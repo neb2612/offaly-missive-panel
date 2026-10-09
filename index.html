@@ -7,18 +7,19 @@
 <link href="https://integrations.missiveapp.com/missive.css" rel="stylesheet">
 <style>
  body{padding:12px;font-size:13px} .p{border-bottom:1px solid rgba(128,128,128,.25);padding:8px 0}
- .n{font-weight:600} .e{opacity:.7;word-break:break-all} button{margin:6px 6px 0 0} .log{padding:4px 0 10px}
+ .n{font-weight:600} .e{opacity:.7;word-break:break-all} button{margin:6px 6px 0 0} .log{padding:4px 0 10px;border-bottom:1px solid rgba(128,128,128,.25)} .big{font-weight:600} .sm{font-size:12px} .h{opacity:.7;margin:8px 0 2px}
 </style>
 </head>
 <body>
 <div id="log" class="log"></div>
 <div id="out" class="text-c">Select a conversation…</div>
 <script>
-// No secrets here. Lookups and note posting run in Odoo, in a normal browser tab, under the user's own Odoo login.
+// No secrets here. Lookups, notes and record creation run in Odoo, in a normal browser tab, under the user's own Odoo login.
 // Email content is passed in the URL #fragment, which browsers never send to any server.
 var ODOO = 'https://odoo.offalygoodfood.com.au';
 var LOOKUP = ODOO + '/missive-lookup';
 var LOG = ODOO + '/missive-log';
+var DO = ODOO + '/missive-do';
 var OWN = ['offalygoodfood.com.au'];
 var MAX_TEXT = 8000;
 function url(email, go){ return LOOKUP + '?email=' + encodeURIComponent(email) + (go ? '&go=' + go : ''); }
@@ -36,25 +37,45 @@ function htmlToText(h){
   return cut > 0 ? t.slice(0, cut).trim() : t;
 }
 var current = null;
+function primaryExternal(m){
+  var addrs = [].concat(m.from_field ? [m.from_field] : [], m.reply_to_fields || [], m.to_fields || [], m.cc_fields || []);
+  return addrs.filter(function(a){ return a && a.address && !isOwn(a.address.toLowerCase()); })[0] || null;
+}
+function doURL(action, ext, m, c){
+  var data = {email: ext.address.toLowerCase(), name: ext.name || '', subject: (m.subject || c.subject || '')};
+  return DO + '?do=' + action + '&email=' + encodeURIComponent(data.email) + '#d=' + encodeURIComponent(JSON.stringify(data));
+}
+function logEmail(m, c, ext){
+  var text = htmlToText(m.body || m.preview), truncated = false;
+  if (text.length > MAX_TEXT){ text = text.slice(0, MAX_TEXT); truncated = true; }
+  var d = m.delivered_at ? new Date(m.delivered_at * 1000) : null;
+  var data = {
+    id: m.id, subject: m.subject || c.subject || '', from: fmt(m.from_field),
+    to: (m.to_fields || []).map(fmt).join(', '), date: d ? d.toLocaleString('en-AU', {dateStyle: 'medium', timeStyle: 'short'}) : '',
+    text: text, truncated: truncated
+  };
+  Missive.openURL(LOG + '?email=' + encodeURIComponent(ext.address.toLowerCase()) + '#d=' + encodeURIComponent(JSON.stringify(data)));
+}
 function renderLog(c){
   var box = document.getElementById('log');
   var m = c && c.latest_message;
-  if (!m || !m.from_field){ box.innerHTML = ''; return; }
-  box.innerHTML = '<button class="button" id="logbtn">Log email to Odoo</button>';
-  document.getElementById('logbtn').onclick = function(){
-    var addrs = [].concat([m.from_field], m.reply_to_fields || [], m.to_fields || [], m.cc_fields || []);
-    var ext = addrs.filter(function(a){ return a && a.address && !isOwn(a.address.toLowerCase()); })[0];
-    if (!ext){ Missive.alert({title: 'No external address', message: 'This email has no customer address to match in Odoo.'}); return; }
-    var text = htmlToText(m.body || m.preview), truncated = false;
-    if (text.length > MAX_TEXT){ text = text.slice(0, MAX_TEXT); truncated = true; }
-    var d = m.delivered_at ? new Date(m.delivered_at * 1000) : null;
-    var data = {
-      id: m.id, subject: m.subject || c.subject || '', from: fmt(m.from_field),
-      to: (m.to_fields || []).map(fmt).join(', '), date: d ? d.toLocaleString('en-AU', {dateStyle: 'medium', timeStyle: 'short'}) : '',
-      text: text, truncated: truncated
+  var ext = m ? primaryExternal(m) : null;
+  if (!m || !ext){ box.innerHTML = ''; return; }
+  box.innerHTML =
+    '<div class="h sm">Customer: ' + esc(ext.name ? ext.name + ' · ' : '') + esc(ext.address) + '</div>' +
+    '<button class="button big" data-a="summary">Customer summary</button>' +
+    '<button class="button" data-a="log">Log email to Odoo</button><br>' +
+    '<button class="button" data-a="order">New order</button>' +
+    '<button class="button" data-a="followup">Follow-up</button>' +
+    '<button class="button" data-a="invoices">Invoices</button>' +
+    '<button class="button" data-a="opp">Opportunity</button>' +
+    '<button class="button sm" data-a="addcontact">Add contact</button>';
+  Array.prototype.forEach.call(box.querySelectorAll('button'), function(b){
+    b.onclick = function(){
+      var a = b.getAttribute('data-a');
+      if (a === 'log'){ logEmail(m, c, ext); } else { Missive.openURL(doURL(a, ext, m, c)); }
     };
-    Missive.openURL(LOG + '?email=' + encodeURIComponent(ext.address.toLowerCase()) + '#d=' + encodeURIComponent(JSON.stringify(data)));
-  };
+  });
 }
 function render(list){
   var out = document.getElementById('out');
