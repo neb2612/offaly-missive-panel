@@ -1,0 +1,50 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Odoo / Xero</title>
+<script src="https://integrations.missiveapp.com/missive.js"></script>
+<link href="https://integrations.missiveapp.com/missive.css" rel="stylesheet">
+<style>
+ body{padding:12px;font-size:13px} .p{border-bottom:1px solid rgba(128,128,128,.25);padding:8px 0}
+ .n{font-weight:600} .e{opacity:.7;word-break:break-all} button{margin:6px 6px 0 0}
+</style>
+</head>
+<body>
+<div id="out" class="text-c">Select a conversation…</div>
+<script>
+// No secrets here. Lookups run in Odoo, in a normal browser tab, under the user's own Odoo login.
+var LOOKUP = 'https://odoo.offalygoodfood.com.au/missive-lookup';
+var OWN = ['offalygoodfood.com.au'];
+function url(email, go){ return LOOKUP + '?email=' + encodeURIComponent(email) + (go ? '&go=' + go : ''); }
+function esc(s){ return String(s||'').replace(/[&<>"]/g, function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
+function render(list){
+  var out = document.getElementById('out');
+  if (!list.length){ out.textContent = 'No external sender in this conversation.'; return; }
+  out.innerHTML = list.map(function(a, i){
+    return '<div class="p"><div class="n">' + esc(a.name || a.address) + '</div><div class="e">' + esc(a.address) + '</div>' +
+      '<button class="button" data-i="'+i+'" data-go="odoo">Odoo contact</button>' +
+      '<button class="button" data-i="'+i+'" data-go="xero">Xero contact</button>' +
+      '<button class="button" data-i="'+i+'" data-go="">All matches</button></div>';
+  }).join('');
+  Array.prototype.forEach.call(out.querySelectorAll('button'), function(b){
+    b.onclick = function(){ Missive.openURL(url(list[+b.dataset.i].address, b.dataset.go)); };
+  });
+}
+Missive.on('change:conversations', function(ids){
+  if (!ids || ids.length !== 1){ document.getElementById('out').textContent = 'Select a single conversation.'; return; }
+  Missive.fetchConversations(ids).then(function(convs){
+    var c = convs[0] || {}, m = c.latest_message || {}, seen = {}, list = [];
+    var cand = [].concat(m.from_field ? [m.from_field] : [], m.reply_to_fields || [], (c.authors || []), m.to_fields || [], m.cc_fields || []);
+    cand.forEach(function(a){
+      var ad = (a && a.address || '').toLowerCase();
+      if (!ad || seen[ad]) return;
+      if (OWN.some(function(d){ return ad.endsWith('@' + d); })) return;
+      seen[ad] = 1; list.push({address: ad, name: a.name});
+    });
+    render(list.slice(0, 5));
+  });
+}, {retroactive: true});
+</script>
+</body>
+</html>
